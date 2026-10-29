@@ -13,7 +13,6 @@ const PANE_PADDING = 8;
 
 /** Perplexity's right-hand pane (sources card, etc.) */
 export const CONTEXT_PANE_SELECTOR = '[class*="w-[var(--context-pane-width)]"]';
-const CONTEXT_PANE_CONTENT_SELECTOR = ".pointer-events-auto";
 
 let activeId: number | null = null;
 let topMostId: number | null = null;
@@ -226,6 +225,33 @@ const getContextPane = (): HTMLElement | null => {
   return rect.width > 0 && rect.height > 0 ? pane : null;
 };
 
+/**
+ * Bottom edge of what the pane is currently showing. Measured from leaf
+ * content (text, icons) rather than from cards, because the pane's wrappers
+ * are often full-height and its cards expand in place (e.g. Computer's usage
+ * card) without matching any stable selector.
+ */
+const getPaneContentBottom = (pane: HTMLElement): number => {
+  const paneBottom = pane.getBoundingClientRect().bottom;
+  let bottom = 0;
+
+  for (const el of pane.querySelectorAll("*")) {
+    const isSvg = el instanceof SVGSVGElement;
+    if (!isSvg && (el.childElementCount > 0 || el.closest("svg") != null))
+      continue;
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0 || rect.bottom > paneBottom)
+      continue;
+    if (getComputedStyle(el).visibility === "hidden") continue;
+
+    bottom = Math.max(bottom, rect.bottom);
+  }
+
+  // Leaves sit inside their card's padding; leave room for it.
+  return bottom === 0 ? 0 : bottom + 16;
+};
+
 const getHeaderHeight = () =>
   parseInt(
     getComputedStyle(document.documentElement).getPropertyValue(
@@ -265,12 +291,7 @@ const calculatePanelPosition = debounce(
     const pane = getContextPane();
     if (pane) {
       const paneRect = pane.getBoundingClientRect();
-      let occupiedBottom = 0;
-      for (const el of pane.querySelectorAll(CONTEXT_PANE_CONTENT_SELECTOR)) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0)
-          occupiedBottom = Math.max(occupiedBottom, rect.bottom);
-      }
+      const occupiedBottom = getPaneContentBottom(pane);
 
       const left = paneRect.left + PANE_PADDING;
       const width = Math.min(

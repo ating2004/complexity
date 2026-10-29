@@ -55,7 +55,8 @@ function cleanup() {
 function observeThread(location: ReturnType<typeof whereAmI>) {
   cleanup();
 
-  if (location === "thread") {
+  // Computer tasks render their chat with the same thread components.
+  if (location === "thread" || location === "computer") {
     observeNavbar({
       observerId: createDomObserverId("thread", "navbar"),
     });

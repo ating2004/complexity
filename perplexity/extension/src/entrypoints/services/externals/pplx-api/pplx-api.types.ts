@@ -132,7 +132,7 @@ export const ThreadMessageApiResponseSchema = z.object({
   author_image: z.string().nullable().catch(null),
   author_username: z.string().nullable().catch(null),
   thread_url_slug: z.string().catch(""),
-  display_model: z.string() as z.ZodType<LanguageModel["code"]>,
+  display_model: z.string().catch("") as z.ZodType<LanguageModel["code"]>,
 });
 
 export type ThreadMessageApiResponse = z.infer<

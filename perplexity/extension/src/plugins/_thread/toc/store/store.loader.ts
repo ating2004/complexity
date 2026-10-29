@@ -96,7 +96,11 @@ export default function () {
       if (!pane) return;
 
       paneObserver.observe(pane);
-      paneMutationObserver.observe(pane, { childList: true, subtree: true });
+      paneMutationObserver.observe(pane, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+      });
     },
   );
 }

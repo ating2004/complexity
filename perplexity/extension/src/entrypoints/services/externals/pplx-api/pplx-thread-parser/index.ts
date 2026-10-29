@@ -31,6 +31,25 @@ export class PplxThreadParser {
       .join("  \n");
   }
 
+  /**
+   * Follow-ups that quote part of an earlier answer are stored as
+   * `<q>quoted text</q> question`. Use the question as the heading and keep the
+   * quote underneath it, instead of emitting a `# <q>` heading.
+   */
+  static formatQueryHeading(query: string): string {
+    const match = /^\s*<q>([\s\S]*?)<\/q>\s*([\s\S]*)$/.exec(query);
+    if (match == null) return `# ${query}`;
+
+    const quote = (match[1] ?? "")
+      .trim()
+      .split("\n")
+      .map((line) => (line.startsWith(">") || line === "" ? line : `> ${line}`))
+      .join("\n");
+    const question = (match[2] ?? "").trim().replace(/\s*\n\s*/g, " ");
+
+    return quote ? `# ${question}\n\n${quote}` : `# ${question}`;
+  }
+
   static formatAnswerWithCitations(params: {
     query: string;
     answer: string;
@@ -39,9 +58,14 @@ export class PplxThreadParser {
   }): string {
     const { query, answer, formattedWebResults, includeQuery } = params;
 
-    return [`# ${query}`, "", answer, "", "# Citations:", formattedWebResults]
-      .slice(-(includeQuery ? 0 : 4))
-      .join("  \n");
+    const parts = includeQuery
+      ? [PplxThreadParser.formatQueryHeading(query), "", answer]
+      : [answer];
+
+    if (formattedWebResults)
+      parts.push("", "# Citations:", formattedWebResults);
+
+    return parts.join("  \n");
   }
 
   static trimReferences({
@@ -66,9 +90,11 @@ export class PplxThreadParser {
   }): string {
     const { query, answer, includeQuery } = params;
 
-    return [`# ${query}`, "", answer]
-      .slice(-(includeQuery ? 0 : 1))
-      .join("  \n");
+    return (
+      includeQuery
+        ? [PplxThreadParser.formatQueryHeading(query), "", answer]
+        : [answer]
+    ).join("  \n");
   }
 
   static exportMessage({

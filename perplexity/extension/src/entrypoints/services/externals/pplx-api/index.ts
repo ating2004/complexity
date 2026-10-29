@@ -181,7 +181,7 @@ export class PplxApiService {
 
       const parsedEntries = z
         .array(ThreadMessageApiResponseSchema)
-        .parse(data.entries);
+        .parse(data.entries.map(normalizeComputerTaskEntry));
 
       allEntries.push(...parsedEntries);
 
@@ -371,4 +371,54 @@ export class PplxApiService {
 
     return true;
   }
+}
+
+/**
+ * Computer tasks ("asi" mode) keep the final answer in `plan.goals[].description`
+ * and only the sources on the FINAL step. Rewrite them into the regular `text`
+ * shape so the rest of the thread parsing stays the same.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeComputerTaskEntry(entry: any): unknown {
+  const goals = entry?.plan?.goals;
+  if (!Array.isArray(goals) || typeof entry.text !== "string") return entry;
+
+  const steps = jsonUtils.safeParse(entry.text);
+  if (!Array.isArray(steps)) return entry;
+
+  const finalStep = [...steps]
+    .reverse()
+    .find((step) => step?.step_type === "FINAL");
+  const finalAnswer =
+    typeof finalStep?.content?.answer === "string"
+      ? jsonUtils.safeParse(finalStep.content.answer)
+      : null;
+
+  // Regular threads also carry a plan; leave them alone.
+  if (typeof finalAnswer?.answer === "string") return entry;
+
+  const answer =
+    [...goals]
+      .reverse()
+      .map((goal) => goal?.description)
+      .find(
+        (description): description is string =>
+          typeof description === "string" && description.trim() !== "",
+      ) ?? "";
+
+  return {
+    ...entry,
+    text: JSON.stringify([
+      {
+        content: {
+          answer: JSON.stringify({
+            answer,
+            web_results: Array.isArray(finalAnswer?.web_results)
+              ? finalAnswer.web_results
+              : [],
+          }),
+        },
+      },
+    ]),
+  };
 }

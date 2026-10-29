@@ -11,7 +11,7 @@ const { ThreadExportMenu } = lazily(
 function ExportThreadWrapper() {
   return (
     <CsUiGuard
-      location={["thread"]}
+      location={["thread", "computer"]}
       dependentPluginIds={["thread:exportThread"]}
     >
       <ThreadNavbarAttributesComponentRegister id="plugin:thread:exportThread">

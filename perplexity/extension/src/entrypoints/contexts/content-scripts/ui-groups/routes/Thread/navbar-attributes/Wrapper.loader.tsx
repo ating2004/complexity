@@ -16,7 +16,7 @@ function ThreadNavbarAttributesComponentsGroupWrapper() {
 
   return (
     <CsUiGuard
-      location={["thread", "comet_assistant"]}
+      location={["thread", "comet_assistant", "computer"]}
       additionalCheck={() => shouldEnable}
     >
       <ThreadNavbarAttributesPluginsGroup />
