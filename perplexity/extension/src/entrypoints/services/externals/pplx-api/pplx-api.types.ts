@@ -114,7 +114,7 @@ export const ThreadMessageTextSchema = z.object({
     z.object({
       name: z.string(),
       url: z.string(),
-      snippet: z.string(),
+      snippet: z.string().catch(""),
     }),
   ),
 });
@@ -129,9 +129,9 @@ export const ThreadMessageApiResponseSchema = z.object({
     })
     .pipe(ThreadMessageTextSchema),
   backend_uuid: z.string(),
-  author_image: z.string().nullable(),
-  author_username: z.string().nullable(),
-  thread_url_slug: z.string(),
+  author_image: z.string().nullable().catch(null),
+  author_username: z.string().nullable().catch(null),
+  thread_url_slug: z.string().catch(""),
   display_model: z.string() as z.ZodType<LanguageModel["code"]>,
 });
 

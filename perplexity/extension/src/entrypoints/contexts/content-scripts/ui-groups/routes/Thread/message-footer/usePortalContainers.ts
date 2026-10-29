@@ -20,6 +20,21 @@ export function usePortalContainers(): (Element | null)[] {
 
     const $portalContainer = $("<div>").internalComponentAttr(OBSERVER_ID);
 
+    // Perplexity's action bar no longer has the old two-group layout, so sit
+    // next to its copy button (which the copy-button plugin hides) when it's
+    // there.
+    const $nativeCopyButton = messageBlock.nodes.$footer
+      .find(
+        DomSelectorsService.Root.cachedSync.THREAD.MESSAGE.FOOTER_CHILD
+          .COPY_BUTTON,
+      )
+      .first();
+
+    if ($nativeCopyButton.length) {
+      $nativeCopyButton.after($portalContainer);
+      return $portalContainer[0] ?? null;
+    }
+
     const $anchor = messageBlock.nodes.$footer.find(
       DomSelectorsService.Root.cachedSync.THREAD.MESSAGE.FOOTER_GROUP.FIRST,
     );

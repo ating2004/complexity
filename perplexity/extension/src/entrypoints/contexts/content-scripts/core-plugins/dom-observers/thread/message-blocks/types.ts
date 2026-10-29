@@ -13,6 +13,8 @@ export type MessageBlock = {
     $footer: JQuery<HTMLElement>;
   };
   content: {
+    /** Perplexity's id for the query row; stable across virtualization */
+    entryUuid: string;
     backendUuid: string;
     title: string;
     answer: string;

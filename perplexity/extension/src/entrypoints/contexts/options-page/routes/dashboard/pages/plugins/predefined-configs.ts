@@ -8,8 +8,9 @@ const defaults = PluginsSettingSnapshotsService.getPluginsFallbackValues();
 
 export const ESSENTIALS_ONLY: PluginsSettings = create(defaults, (draft) => {
   draft["thread:toc"].enabled = true;
-  draft["thread:exportThread"].enabled = true;
   draft["thread:betterMessageCopyButtons"].enabled = true;
+  draft["thread:messageCompletionNotification"].enabled = true;
+  draft["blockAnalyticEvents"].enabled = true;
 });
 
 export const POWER_USER: PluginsSettings = create(defaults, (draft) => {

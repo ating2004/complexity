@@ -1,5 +1,7 @@
 export type TocItem = {
   id: number;
+  /** Perplexity's row id, used to reach rows that are currently unmounted */
+  uuid: string;
   title: string;
   element: JQuery<Element>;
   isActive?: boolean;
@@ -7,7 +9,8 @@ export type TocItem = {
 };
 
 export type PanelPosition = {
-  position: { left: number };
+  /** Viewport coordinates; the panel is `position: fixed` */
+  position: { top: number; left: number; right: number };
   isOverflowing: boolean;
   width: number;
 };

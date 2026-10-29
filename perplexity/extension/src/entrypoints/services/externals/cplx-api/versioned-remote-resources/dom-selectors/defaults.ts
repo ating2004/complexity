@@ -17,21 +17,22 @@ export const DOM_SELECTORS = {
   },
   THREAD: {
     NAVBAR: String.raw`:is(.h-headerHeight.fixed.z-10, .h-headerHeight.\@container\/header)`,
-    WRAPPER: String.raw`:is(.h-headerHeight.\@container\/header ~ div .\@container.isolate, .h-headerHeight.fixed.z-10 ~ .\@container.isolate)`,
+    /** The scroll container that holds the thread */
+    WRAPPER: String.raw`.scrollable-container:has(.group\/thread-content)`,
     /** The container that wraps all messages */
     MESSAGE_BLOCKS_WRAPPER: {
       DESKTOP: {
-        NORMAL: String.raw`.h-headerHeight.\@container\/header ~ div .mx-auto > .flex.flex-col:not([id])`,
-        BRANCHED: String.raw`.h-headerHeight.\@container\/header ~ div .mx-auto > .flex.flex-col:not([id])`,
+        NORMAL: String.raw`.group\/thread-content`,
+        BRANCHED: String.raw`.group\/thread-content`,
       },
       MOBILE: {
-        NORMAL: String.raw`.h-headerHeight ~ div .mx-auto > .flex.flex-col:not([id])`,
-        BRANCHED: String.raw`.h-headerHeight ~ div .mx-auto > .flex.flex-col:not([id])`,
+        NORMAL: String.raw`.group\/thread-content`,
+        BRANCHED: String.raw`.group\/thread-content`,
       },
     },
     MESSAGE: {
-      QUERY_WRAPPER: "[role=tabpanel] .flex.flex-col > .bg-base",
-      QUERY: String.raw`.group\/query`,
+      QUERY_WRAPPER: String.raw`.group\/user-bubble`,
+      QUERY: ".select-none.p-3.bg-subtle",
       QUERY_EDIT_TEXTBOX:
         'div[contenteditable="true"][role="textbox"]:not([id])',
       QUERY_EDIT_BUTTON_GROUP: String.raw`.pointer-events-none.group-hover\:opacity-100.focus-within\:pointer-events-auto.focus-within\:opacity-100`,
@@ -41,7 +42,7 @@ export const DOM_SELECTORS = {
       STICKY_HEADER: ".h-headerHeight.fixed.z-10",
       SOURCES: String.raw`.gap-sm.grid.grid-cols-4.md\:px-0`,
       CONTENT_WRAPPER: "[role=tabpanel] .flex.flex-col > .bg-base + div", // ref QUERY_WRAPPER ⬆️
-      ANSWER: "div[id*='markdown-content-']",
+      ANSWER: "[data-workflow-final-text]",
       ANSWER_TEXT_CONTENT: ".prose.text-pretty",
       /** The footer of the message (share, rewrite, model name, etc.) */
       FOOTER:

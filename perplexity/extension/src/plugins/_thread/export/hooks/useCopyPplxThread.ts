@@ -1,11 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { toast } from "@/components/ui/use-toast";
-import {
-  threadMessageBlocksDomObserverStore,
-  useThreadMessageBlocksDomObserverStore,
-} from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/thread/message-blocks/store";
-import { DomSelectorsService } from "@/entrypoints/contexts/content-scripts/services/dom-selectors/service-init.loader";
+import { threadMessageBlocksDomObserverStore } from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/thread/message-blocks/store";
 import type { ThreadMessageApiResponse } from "@/entrypoints/services/externals/pplx-api/pplx-api.types";
 import { PplxThreadParser } from "@/entrypoints/services/externals/pplx-api/pplx-thread-parser";
 import { pplxApiQueries } from "@/entrypoints/services/externals/pplx-api/query-keys";
@@ -37,27 +33,10 @@ export function useCopyPplxThread() {
     enabled: false,
   });
 
-  const fetchFn: FetchFn = async () => {
-    const messageBlocksFiberData =
-      useThreadMessageBlocksDomObserverStore.getState().messageBlocks;
-
-    if (messageBlocksFiberData == null || messageBlocksFiberData.length > 50) {
-      return (await refetch({ throwOnError: true })).data;
-    }
-
-    return messageBlocksFiberData.map((messageBlock) => ({
-      query_str: messageBlock.content.title,
-      text: {
-        answer: messageBlock.content.answer,
-        web_results: messageBlock.content.webResults,
-      },
-      backend_uuid: messageBlock.content.backendUuid,
-      author_image: null,
-      author_username: null,
-      thread_url_slug: threadSlug,
-      display_model: messageBlock.content.displayModel,
-    }));
-  };
+  // React's thread data only carries the queries now, so answers always come
+  // from the REST API.
+  const fetchFn: FetchFn = async () =>
+    (await refetch({ throwOnError: true })).data;
 
   return {
     isFetching,
@@ -65,17 +44,15 @@ export function useCopyPplxThread() {
       messageBlockIndex,
       withCitations,
     }: CopyMessageParams) => {
-      return (
-        withCitations
-          ? copyMessageWithCitations({ messageBlockIndex })
-          : copyMessageWithoutCitations({ messageBlockIndex })
-      ).catch((error) => {
-        toast({
-          title: "❌ Failed to copy message",
-          description:
-            error instanceof Error ? error.message : "Unknown error occurred",
-        });
-      });
+      return copyMessage({ fetchFn, messageBlockIndex, withCitations }).catch(
+        (error) => {
+          toast({
+            title: "❌ Failed to copy message",
+            description:
+              error instanceof Error ? error.message : "Unknown error occurred",
+          });
+        },
+      );
     },
     copyThread: async ({ withCitations }: CopyThreadParams) => {
       return (
@@ -107,70 +84,65 @@ export function useCopyPplxThread() {
   };
 }
 
-async function copyMessageWithCitations({
+async function findApiMessage({
+  fetchFn,
   messageBlockIndex,
 }: {
+  fetchFn: FetchFn;
   messageBlockIndex: number;
 }) {
+  const entries = await fetchFn();
+
+  invariant(entries != null, "Failed to fetch thread info");
+
   const content =
     threadMessageBlocksDomObserverStore.getState().messageBlocks?.[
       messageBlockIndex
     ]?.content;
 
-  if (content == null) {
-    const $footer =
-      threadMessageBlocksDomObserverStore.getState().messageBlocks?.[
-        messageBlockIndex
-      ]?.nodes.$footer;
+  const ids = [content?.backendUuid, content?.entryUuid].filter(
+    (id): id is string => id != null && id !== "",
+  );
 
-    if (!$footer || !$footer.length) return;
+  const message =
+    entries.find((entry) => ids.includes(entry.backend_uuid)) ??
+    entries[messageBlockIndex];
 
-    const $copyButton = $footer.find(
-      DomSelectorsService.Root.cachedSync.THREAD.MESSAGE.FOOTER_CHILD
-        .COPY_BUTTON,
-    );
+  invariant(message != null, "Message not found");
 
-    if (!$copyButton.length) return;
+  return message;
+}
 
-    $copyButton.trigger("click");
+async function copyMessage({
+  fetchFn,
+  messageBlockIndex,
+  withCitations,
+}: {
+  fetchFn: FetchFn;
+  messageBlockIndex: number;
+  withCitations: boolean;
+}) {
+  const message = await findApiMessage({ fetchFn, messageBlockIndex });
+  const answer = message.text.answer;
+  const webResults = message.text.web_results;
 
+  if (!withCitations) {
+    await dualClipboardPut({
+      markdown: PplxThreadParser.trimReferences({ answer, webResults }),
+    });
     return;
   }
 
-  const cleanAnswer = content.answer.replace(
+  const cleanAnswer = answer.replace(
     /\[(.*?)\]\(pplx:\/\/action\/followup\)/g,
     "$1",
   );
 
-  if (content.webResults.length) {
-    void dualClipboardPut({
-      markdown: `${cleanAnswer}\n\nCitations:\n${PplxThreadParser.formatWebResults(content.webResults)}`,
-    });
-  } else {
-    void dualClipboardPut({
-      markdown: cleanAnswer,
-    });
-  }
-}
-
-async function copyMessageWithoutCitations({
-  messageBlockIndex,
-}: {
-  messageBlockIndex: number;
-}) {
-  const content =
-    threadMessageBlocksDomObserverStore.getState().messageBlocks?.[
-      messageBlockIndex
-    ]?.content;
-
-  invariant(content != null, "Content not found");
-
-  const message = PplxThreadParser.trimReferences({
-    answer: content.answer,
-    webResults: content.webResults,
+  await dualClipboardPut({
+    markdown: webResults.length
+      ? `${cleanAnswer}\n\nCitations:\n${PplxThreadParser.formatWebResults(webResults)}`
+      : cleanAnswer,
   });
-
-  void dualClipboardPut({ markdown: message });
 }
 
 async function copyThreadWithCitations({ fetchFn }: { fetchFn: FetchFn }) {

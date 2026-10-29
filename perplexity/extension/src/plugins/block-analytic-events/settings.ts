@@ -15,9 +15,9 @@ export const settingsSchemas = definePluginSettingsSchemas({
   },
 });
 
-export const settingsStorage = new PluginSettingsService<
-  (typeof settingsSchemas)[1]["fallback"]
->({
+export type Settings = z.infer<(typeof settingsSchemas)[1]["schema"]>;
+
+export const settingsStorage = new PluginSettingsService<Settings>({
   id: "blockAnalyticEvents",
   settingsSchemas,
 });

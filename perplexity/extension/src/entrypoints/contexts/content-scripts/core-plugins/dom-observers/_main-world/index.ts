@@ -8,6 +8,10 @@ import {
   getInternalSearchStates,
   setInternalSearchStates,
 } from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/_main-world/actions/internal-search-states";
+import {
+  getThreadEntries,
+  scrollToThreadEntry,
+} from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/_main-world/actions/thread-entries";
 import { getThreadMessages } from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/_main-world/actions/thread-messages";
 import { isInContentScript } from "@/utils/misc/utils";
 import { getDocumentAdapter } from "@/utils/wrappers/comctx/get-document-adapter";
@@ -24,6 +28,8 @@ const [registerService, getService] = defineProxy(getRootService, {
 class Implementation {
   static isInitialized: () => true = () => true;
   static getThreadMessages = getThreadMessages;
+  static getThreadEntries = getThreadEntries;
+  static scrollToThreadEntry = scrollToThreadEntry;
   static getCodeBlocksContent = getCodeBlocksContent;
   static getCodeBlockContent = getCodeBlockContent;
   static getInternalSearchStates = getInternalSearchStates;

@@ -9,10 +9,14 @@ const PANEL_MARGIN = 32;
 const DEFAULT_HEADER_HEIGHT = 53;
 const MAX_PANEL_WIDTH = 300;
 const MIN_PANEL_WIDTH = 200;
+const PANE_PADDING = 8;
+
+/** Perplexity's right-hand pane (sources card, etc.) */
+export const CONTEXT_PANE_SELECTOR = '[class*="w-[var(--context-pane-width)]"]';
+const CONTEXT_PANE_CONTENT_SELECTOR = ".pointer-events-auto";
 
 let activeId: number | null = null;
 let topMostId: number | null = null;
-let observer: IntersectionObserver | null = null;
 let topMostObserver: IntersectionObserver | null = null;
 let lastMessageBlocks: MessageBlock[] | null = null;
 let pendingUpdate = false;
@@ -24,7 +28,6 @@ let currentThreadWrapper: HTMLElement | null = null;
 let currentMessageBlocks: MessageBlock[] | null = null;
 
 const createObservers = (() => {
-  let cachedObserver: IntersectionObserver | null = null;
   let cachedTopMostObserver: IntersectionObserver | null = null;
 
   const getHeaderHeight = () => {
@@ -51,20 +54,7 @@ const createObservers = (() => {
     };
   };
 
-  return (
-    onIntersect: (id: number) => void,
-    onTopMostIntersect: (id: number) => void,
-  ) => {
-    if (!cachedObserver) {
-      cachedObserver = new IntersectionObserver(
-        createIntersectionHandler(onIntersect),
-        {
-          threshold: 0,
-          rootMargin: "-49% 0px -49% 0px",
-        },
-      );
-    }
-
+  return (onTopMostIntersect: (id: number) => void) => {
     if (!cachedTopMostObserver) {
       const headerHeight = getHeaderHeight();
       cachedTopMostObserver = new IntersectionObserver(
@@ -77,17 +67,12 @@ const createObservers = (() => {
     }
 
     return {
-      observer: cachedObserver,
       topMostObserver: cachedTopMostObserver,
     };
   };
 })();
 
 const cleanupObserver = () => {
-  if (observer) {
-    observer.disconnect();
-    observer = null;
-  }
   if (topMostObserver) {
     topMostObserver.disconnect();
     topMostObserver = null;
@@ -107,6 +92,53 @@ const updateActiveItem = (id: number) => {
         item.isActive = false;
       }
     }
+  });
+};
+
+/**
+ * The active entry is the last query row above a reading line near the top of
+ * the scroller. Rows are a single line tall and answers sit below them as
+ * siblings, so watching rows cross the viewport's middle (as before) left the
+ * highlight stuck while reading a long answer.
+ */
+const updateActiveItemFromScroll = () => {
+  if (currentThreadWrapper == null || currentMessageBlocks == null) return;
+  if (currentMessageBlocks.length === 0) return;
+
+  const scroller = currentThreadWrapper;
+  const lastIndex = currentMessageBlocks.length - 1;
+
+  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+    updateActiveItem(lastIndex);
+    return;
+  }
+
+  const readingLine =
+    scroller.getBoundingClientRect().top + scroller.clientHeight * 0.35;
+
+  let active = -1;
+  let firstMounted = -1;
+
+  currentMessageBlocks.forEach((block, index) => {
+    const element = block.nodes.$wrapper[0];
+    if (!element?.isConnected) return;
+    if (firstMounted === -1) firstMounted = index;
+    if (element.getBoundingClientRect().top <= readingLine) active = index;
+  });
+
+  // Every mounted row is below the line: we're reading the answer of the
+  // entry just before them, which has been unmounted.
+  if (active === -1) active = Math.max(firstMounted - 1, 0);
+
+  updateActiveItem(active);
+};
+
+let scrollFrame = 0;
+const onScroll = () => {
+  if (scrollFrame) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0;
+    updateActiveItemFromScroll();
   });
 };
 
@@ -134,8 +166,7 @@ const updateItems = (
 
   cleanupObserver();
 
-  const observers = createObservers(updateActiveItem, updateTopMostItem);
-  observer = observers.observer;
+  const observers = createObservers(updateTopMostItem);
   topMostObserver = observers.topMostObserver;
 
   const existingTitles = new Map(
@@ -143,10 +174,9 @@ const updateItems = (
   );
 
   const newItems = messageBlocks.map(
-    ({ nodes: { $wrapper }, content: { title } }, idx: number) => {
+    ({ nodes: { $wrapper }, content: { title, entryUuid } }, idx: number) => {
       const element = $wrapper[0];
       if (element) {
-        observer!.observe(element);
         topMostObserver!.observe(element);
       }
 
@@ -155,6 +185,7 @@ const updateItems = (
 
       return {
         id: idx,
+        uuid: entryUuid,
         title: itemTitle,
         element: $wrapper,
         isActive: idx === activeId,
@@ -164,29 +195,43 @@ const updateItems = (
   );
 
   threadTocStore.setState({ tocItems: newItems });
+  updateActiveItemFromScroll();
 };
 
-const getActiveMessageBlockContentWrapper = (): HTMLElement | null => {
-  if (currentTocItems.length === 0 || !currentMessageBlocks) {
-    return null;
-  }
-
-  const activeMessageBlockId = currentTocItems.findIndex(
-    (item) => item.isActiveTopMost,
+/**
+ * The column the answers are laid out in. Measured from a mounted block so the
+ * panel sits in the gutter to its right.
+ */
+const getContentColumn = (): HTMLElement | null => {
+  const mounted = currentMessageBlocks?.find(
+    (block) => !block.states.isVirtualized,
   );
-  const targetBlockId = activeMessageBlockId === -1 ? 0 : activeMessageBlockId;
-  const messageBlock = currentMessageBlocks[targetBlockId];
+  const answer = mounted?.nodes.$answer[0];
+  const column =
+    answer?.closest<HTMLElement>(".max-w-threadContentWidth") ??
+    currentThreadWrapper?.querySelector<HTMLElement>(
+      ".max-w-threadContentWidth",
+    ) ??
+    answer ??
+    mounted?.nodes.$wrapper[0] ??
+    null;
 
-  if (!messageBlock) {
-    return null;
-  }
-
-  if (messageBlock.states.isVirtualized) {
-    return currentMessageBlocks[0]?.nodes.$contentWrapper[0] ?? null;
-  }
-
-  return messageBlock.nodes.$contentWrapper[0] ?? null;
+  return column;
 };
+
+const getContextPane = (): HTMLElement | null => {
+  const pane = document.querySelector<HTMLElement>(CONTEXT_PANE_SELECTOR);
+  if (!pane) return null;
+  const rect = pane.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? pane : null;
+};
+
+const getHeaderHeight = () =>
+  parseInt(
+    getComputedStyle(document.documentElement).getPropertyValue(
+      "--header-height",
+    ),
+  ) || DEFAULT_HEADER_HEIGHT;
 
 const calculatePanelPosition = debounce(
   () => {
@@ -195,45 +240,68 @@ const calculatePanelPosition = debounce(
       return;
     }
 
-    const activeMessageBlockContentWrapper =
-      getActiveMessageBlockContentWrapper();
+    const column = getContentColumn();
 
-    if (activeMessageBlockContentWrapper == null) {
+    if (column == null) {
       threadTocStore.setState({ panelPosition: null });
       return;
     }
 
-    const threadContentWrapperOffsetRight =
-      activeMessageBlockContentWrapper.offsetLeft +
-      activeMessageBlockContentWrapper.offsetWidth;
+    // Measured against the scroller rather than the window: in Computer mode
+    // the chat column is narrow and a report pane sits to its right.
+    const scrollerRect = currentThreadWrapper.getBoundingClientRect();
+    const columnRect = column.getBoundingClientRect();
 
-    if (threadContentWrapperOffsetRight <= 0) {
+    if (columnRect.width === 0 || scrollerRect.width === 0) {
       threadTocStore.setState({ panelPosition: null });
       return;
     }
 
-    const availableSpace =
-      currentThreadWrapper.offsetWidth -
-      threadContentWrapperOffsetRight -
-      PANEL_PADDING -
-      PANEL_MARGIN;
+    const top = Math.max(scrollerRect.top, getHeaderHeight()) + 20;
+    const right = Math.max(window.innerWidth - scrollerRect.right, 0) + 16;
 
-    const panelWidth = Math.max(
-      MIN_PANEL_WIDTH,
-      Math.min(MAX_PANEL_WIDTH, availableSpace),
-    );
+    // When Perplexity shows its right-hand pane, the gutter belongs to it:
+    // dock inside the pane, below whatever it is currently showing.
+    const pane = getContextPane();
+    if (pane) {
+      const paneRect = pane.getBoundingClientRect();
+      let occupiedBottom = 0;
+      for (const el of pane.querySelectorAll(CONTEXT_PANE_CONTENT_SELECTOR)) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0)
+          occupiedBottom = Math.max(occupiedBottom, rect.bottom);
+      }
 
-    const panelRightEdge =
-      threadContentWrapperOffsetRight + panelWidth + PANEL_PADDING;
-    const isOverflowing = panelRightEdge > currentThreadWrapper.offsetWidth;
+      const left = paneRect.left + PANE_PADDING;
+      const width = Math.min(
+        paneRect.width - PANE_PADDING * 2,
+        scrollerRect.right - left - PANE_PADDING,
+      );
+
+      if (width >= MIN_PANEL_WIDTH) {
+        threadTocStore.setState({
+          panelPosition: {
+            position: { top: Math.max(top, occupiedBottom + 12), left, right },
+            isOverflowing: false,
+            width,
+          },
+        });
+        return;
+      }
+    }
+
+    const left = columnRect.right + PANEL_MARGIN;
+    const availableSpace = scrollerRect.right - left - PANEL_PADDING;
+    const isOverflowing = availableSpace < MIN_PANEL_WIDTH;
+    const panelWidth = isOverflowing
+      ? Math.min(MAX_PANEL_WIDTH, Math.max(scrollerRect.width - 32, 0))
+      : Math.min(MAX_PANEL_WIDTH, availableSpace);
 
     threadTocStore.setState({
       panelPosition: {
-        position: {
-          left: threadContentWrapperOffsetRight + PANEL_MARGIN,
-        },
+        position: { top, left, right },
         isOverflowing,
-        width: isOverflowing ? MAX_PANEL_WIDTH : panelWidth,
+        width: panelWidth,
       },
     });
   },
@@ -251,7 +319,12 @@ export const utils = {
     currentTocItems = items;
   },
   setCurrentThreadWrapper: (wrapper: HTMLElement | null) => {
+    currentThreadWrapper?.removeEventListener("scroll", onScroll);
     currentThreadWrapper = wrapper;
+    currentThreadWrapper?.addEventListener("scroll", onScroll, {
+      passive: true,
+    });
+    updateActiveItemFromScroll();
   },
   getCurrentTocItems: () => currentTocItems,
   getLastMessageBlocks: () => lastMessageBlocks,
