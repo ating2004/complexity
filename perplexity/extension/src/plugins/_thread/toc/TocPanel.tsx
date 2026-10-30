@@ -51,6 +51,29 @@ export function TocPanel() {
   const panelPosition = useThreadTocStore((store) => store.panelPosition);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const activeIndex = tocItems.findIndex((item) => item.isActive);
+
+  // Long threads overflow the list; keep the highlighted entry in view.
+  useEffect(() => {
+    const list = listRef.current;
+    const activeEl =
+      activeIndex >= 0
+        ? (list?.children[activeIndex] as HTMLElement | null)
+        : null;
+    if (!list || !activeEl) return;
+
+    const listRect = list.getBoundingClientRect();
+    const itemRect = activeEl.getBoundingClientRect();
+    const margin = 24;
+
+    if (itemRect.top < listRect.top + margin) {
+      list.scrollTop -= listRect.top + margin - itemRect.top;
+    } else if (itemRect.bottom > listRect.bottom - margin) {
+      list.scrollTop += itemRect.bottom - (listRect.bottom - margin);
+    }
+  }, [activeIndex]);
 
   useInsertCss({
     id: "thread-toc",
@@ -98,24 +121,27 @@ export function TocPanel() {
         })}
         style={{ width, top, ...(isFloating ? { right } : { left }) }}
       >
+        {isFloating && (
+          <div
+            className="x:absolute x:top-2 x:right-2 x:z-10 x:cursor-pointer x:rounded-full x:p-1 x:text-muted-foreground x:transition-colors x:hover:text-foreground"
+            onClick={() => setIsOpen(false)}
+          >
+            <TablerX className="x:size-4" />
+          </div>
+        )}
         <div
+          ref={listRef}
           className={cn(
             "custom-scrollbar",
-            "x:flex x:h-full x:flex-col x:gap-2 x:overflow-y-auto",
-            {
-              "x:max-h-[60vh] x:p-4 x:pr-10": isFloating,
-              "x:max-h-[80vh]": !isFloating,
-            },
+            "x:flex x:flex-col x:gap-2 x:overflow-y-auto x:overscroll-contain",
+            { "x:p-4 x:pr-10": isFloating },
           )}
+          // Docked under the sources card, the panel starts well down the
+          // page, so a fixed vh cap pushed later entries off screen.
+          style={{
+            maxHeight: `calc(100vh - ${top}px - 16px)`,
+          }}
         >
-          {isFloating && (
-            <div
-              className="x:absolute x:top-2 x:right-2 x:cursor-pointer x:rounded-full x:p-1 x:text-muted-foreground x:transition-colors x:hover:text-foreground"
-              onClick={() => setIsOpen(false)}
-            >
-              <TablerX className="x:size-4" />
-            </div>
-          )}
           {tocItems.map((item, idx) => (
             <TocItem
               key={idx}

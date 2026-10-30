@@ -123,6 +123,25 @@ function collectSources(
   }
 }
 
+/**
+ * A follow-up sent by quoting part of an answer, with nothing typed, has an
+ * empty `query`; the quote only survives in the step's text chunks, as
+ * `<q>\n\n> quoted text\n\n</q>`. Falls back to that quote as the title.
+ */
+function quotedText(step: any): string {
+  const chunks: unknown = step?.payload?.chunks;
+  if (!Array.isArray(chunks)) return "";
+
+  const text = chunks.filter((c) => typeof c === "string").join("");
+  const quote = /<q>([\s\S]*?)<\/q>/.exec(text)?.[1] ?? "";
+
+  return quote
+    .split("\n")
+    .map((line) => line.replace(/^\s*>\s?/, "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 function entriesFromStepList(steps: any[]): ThreadEntry[] {
   const entries: ThreadEntry[] = [];
   const seen = new Set<string>();
@@ -138,10 +157,15 @@ function entriesFromStepList(steps: any[]): ThreadEntry[] {
 
     const entry = step?._entry;
     const uuid = entry?.entryUuid ?? entry?.uuid;
-    const query = entry?.query ?? entry?.query_str;
+    const rawQuery: unknown = entry?.query ?? entry?.query_str;
+    const quote = quotedText(step);
+    const query =
+      typeof rawQuery === "string" && rawQuery.trim()
+        ? rawQuery
+        : quote && `“${quote}”`;
 
     if (step?.sender !== "user" || typeof uuid !== "string") continue;
-    if (seen.has(uuid) || typeof query !== "string" || !query.trim()) continue;
+    if (seen.has(uuid) || !query.trim()) continue;
 
     seen.add(uuid);
     current = {
