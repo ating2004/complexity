@@ -16,6 +16,11 @@ const EXTENSION_TO_MIME_TYPE: Record<string, string> = Object.entries(
   {} as Record<string, string>,
 );
 
+/**
+ * Resolves to `false` only when the browser refused to open the save dialog
+ * (e.g. too long since the user's click); a cancelled dialog still counts as
+ * shown.
+ */
 export default async function downloadFile({
   data,
   filename,
@@ -24,15 +29,16 @@ export default async function downloadFile({
   data: string;
   filename: string;
   mimeType?: string;
-}) {
+}): Promise<boolean> {
   const resolvedMimeType =
     mimeType || inferMimeTypeFromFilename(filename) || "application/json";
 
   if (APP_CONFIG.BROWSER === "chrome" && "showSaveFilePicker" in window) {
-    await downloadFileChrome(data, filename, resolvedMimeType);
-  } else {
-    downloadFileGeneric(data, filename, resolvedMimeType);
+    return downloadFileChrome(data, filename, resolvedMimeType);
   }
+
+  downloadFileGeneric(data, filename, resolvedMimeType);
+  return true;
 }
 
 function inferMimeTypeFromFilename(filename: string): string | null {
@@ -44,11 +50,13 @@ async function downloadFileChrome(
   data: string,
   filename: string,
   mimeType: string,
-) {
+): Promise<boolean> {
+  const extension = MIME_TYPE_TO_EXTENSION[mimeType] || ".bin";
+
+  let handle;
   try {
-    const extension = MIME_TYPE_TO_EXTENSION[mimeType] || ".bin";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handle = await (window as any).showSaveFilePicker({
+    handle = await (window as any).showSaveFilePicker({
       suggestedName: filename,
       types: [
         {
@@ -59,15 +67,21 @@ async function downloadFileChrome(
         },
       ],
     });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "AbortError") return true;
+    console.error("Failed to open the save dialog:", error);
+    return false;
+  }
 
+  try {
     const writable = await handle.createWritable();
     await writable.write(data);
     await writable.close();
   } catch (error: unknown) {
-    if (error instanceof Error && error.name !== "AbortError") {
-      console.error("Failed to save file:", error);
-    }
+    console.error("Failed to save file:", error);
   }
+
+  return true;
 }
 
 function downloadFileGeneric(data: string, filename: string, mimeType: string) {

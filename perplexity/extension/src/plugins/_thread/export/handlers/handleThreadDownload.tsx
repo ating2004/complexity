@@ -37,41 +37,37 @@ export async function handleThreadDownload({
   showWaitingToast();
 
   try {
-    const start = performance.now();
     const content = await getContent({ withCitations });
-    const elapsed = performance.now() - start;
 
     dismissWaitingToast();
 
-    // if the time between calling .showSaveFilePicker and the last user gesture is too long, the browser will raise a security error.
-    if (elapsed > 500) {
-      const toastInstance = toast({
-        title: (
-          <div className="x:flex x:items-center x:gap-1">
-            <TablerFileDownload className="x:size-4 x:text-primary" />
-            <span>
-              {t("plugin-thread-export.actions.largeFileDownloadPrompt.title")}
-            </span>
-          </div>
-        ),
-        description: t(
-          "plugin-thread-export.actions.largeFileDownloadPrompt.description",
-        ),
-        className: "x:cursor-pointer",
-        onClick: () => {
-          toastInstance.dismiss();
-          void downloadFile({
-            data: content,
-            filename,
-          });
-        },
-        duration: Infinity,
-      });
-    }
+    // Fetching the thread can take long enough that the browser no longer
+    // counts the click as a user gesture and refuses to open the save dialog.
+    // Only then ask for another click.
+    const isDialogShown = await downloadFile({ data: content, filename });
+    if (isDialogShown) return;
 
-    await downloadFile({
-      data: content,
-      filename,
+    const toastInstance = toast({
+      title: (
+        <div className="x:flex x:items-center x:gap-1">
+          <TablerFileDownload className="x:size-4 x:text-primary" />
+          <span>
+            {t("plugin-thread-export.actions.largeFileDownloadPrompt.title")}
+          </span>
+        </div>
+      ),
+      description: t(
+        "plugin-thread-export.actions.largeFileDownloadPrompt.description",
+      ),
+      className: "x:cursor-pointer",
+      onClick: () => {
+        toastInstance.dismiss();
+        void downloadFile({
+          data: content,
+          filename,
+        });
+      },
+      duration: Infinity,
     });
   } catch (error) {
     dismissWaitingToast();
