@@ -7,6 +7,7 @@ import { useInsertCss } from "@/hooks/useInsertCss";
 import { threadTocCssResourceConfig } from "@/plugins/_thread/toc/index.remote-resources";
 import { useThreadTocStore } from "@/plugins/_thread/toc/store";
 import type { TocItem as TocItemType } from "@/plugins/_thread/toc/store/types";
+import { utils } from "@/plugins/_thread/toc/store/utils";
 import TocItem from "@/plugins/_thread/toc/TocItem";
 import { useHandleTouch } from "@/plugins/_thread/toc/useHandleTouch";
 import { scrollToElement } from "@/utils/dom-utils/generics";
@@ -28,6 +29,8 @@ function findBlockElement(id: number) {
 }
 
 function scrollToItem(item: TocItemType) {
+  utils.pinActiveItem(item.id);
+
   // The main world can see React's row ids, so it can page toward rows that
   // Perplexity has unmounted and keep the target anchored while it renders.
   if (item.uuid) {

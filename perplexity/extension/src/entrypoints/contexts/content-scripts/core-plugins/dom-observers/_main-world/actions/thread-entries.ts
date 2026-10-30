@@ -64,9 +64,17 @@ function findStepList(props: any): any[] | null {
   return null;
 }
 
+/**
+ * While Perplexity swaps threads in place, the outgoing thread can still be in
+ * the DOM for a moment, so prefer the one that's actually rendered.
+ */
 function threadRoot(): Element | null {
+  const isRendered = (el: Element) => el.getClientRects().length > 0;
+  const roots = [...document.querySelectorAll(THREAD_ROOT_SELECTOR)];
+
   return (
-    document.querySelector(THREAD_ROOT_SELECTOR) ??
+    roots.find(isRendered) ??
+    roots[0] ??
     document.querySelector(SCROLLER_SELECTOR)
   );
 }
@@ -151,8 +159,16 @@ function entriesFromStepList(steps: any[]): ThreadEntry[] {
 /**
  * Ancestors closer to the row also hold step lists — but only for their own
  * round — so every ancestor is checked and the longest list wins.
+ *
+ * React keeps two copies of each fiber and alternates between them. When
+ * Perplexity switches threads in place, the copy reachable from a DOM node
+ * can still hold the previous thread's steps, so both copies are checked and
+ * only lists containing this row's own entry are accepted.
  */
 function entriesFromSteps(rowEl: Element): ThreadEntry[] | null {
+  const rowUuid = rowProps(rowEl)?.uuid;
+  if (rowUuid == null) return null;
+
   let best: ThreadEntry[] | null = null;
   let fiber = fiberOf(rowEl);
 
@@ -161,11 +177,14 @@ function entriesFromSteps(rowEl: Element): ThreadEntry[] | null {
     fiber != null && depth < 60;
     depth++, fiber = fiber.return
   ) {
-    const steps = findStepList(fiber.memoizedProps);
-    if (!steps) continue;
+    for (const props of [fiber.memoizedProps, fiber.alternate?.memoizedProps]) {
+      const steps = findStepList(props);
+      if (!steps) continue;
 
-    const entries = entriesFromStepList(steps);
-    if (best == null || entries.length > best.length) best = entries;
+      const entries = entriesFromStepList(steps);
+      if (!entries.some((entry) => entry.uuid === rowUuid)) continue;
+      if (best == null || entries.length > best.length) best = entries;
+    }
   }
 
   return best;
@@ -227,15 +246,18 @@ export async function scrollToThreadEntry({
   const targetIdx = order.indexOf(uuid);
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
-  const align = (el: Element) => {
-    const delta =
-      el.getBoundingClientRect().top -
-      scroller.getBoundingClientRect().top +
-      offset;
-    if (Math.abs(delta) > 1) scroller.scrollTop += delta;
-    return delta;
-  };
+  // Instant, so a CSS `scroll-behavior: smooth` can't leave us measuring
+  // mid-animation positions.
+  const scrollTo = (top: number) =>
+    scroller.scrollTo({ top, behavior: "instant" });
+
+  // Right after a thread opens, Perplexity keeps it pinned to the bottom while
+  // content loads, and would pull the scroller back down against us (the page
+  // visibly jitters). Stick-to-bottom behaviours let go on an upward wheel, so
+  // signal one before taking over.
+  scroller.dispatchEvent(
+    new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true }),
+  );
 
   for (let attempt = 0; attempt < 120; attempt++) {
     if (seekId !== activeSeek) return false;
@@ -244,14 +266,7 @@ export async function scrollToThreadEntry({
     const hit = rows.find((row) => row.uuid === uuid);
 
     if (hit) {
-      let stableFrames = 0;
-      for (let frame = 0; frame < 90 && stableFrames < 6; frame++) {
-        if (seekId !== activeSeek) return false;
-        const current =
-          scanRows(root).find((row) => row.uuid === uuid)?.el ?? hit.el;
-        stableFrames = Math.abs(align(current)) <= 1 ? stableFrames + 1 : 0;
-        await nextFrame();
-      }
+      await settleOn({ hit: hit.el, uuid, root, scroller, offset, seekId });
       return true;
     }
 
@@ -264,13 +279,73 @@ export async function scrollToThreadEntry({
         : false;
 
     const before = scroller.scrollTop;
-    scroller.scrollTop += (goUp ? -1 : 1) * scroller.clientHeight * 0.8;
+    scrollTo(before + (goUp ? -1 : 1) * scroller.clientHeight * 0.8);
     if (scroller.scrollTop === before) return false;
 
     await sleep(60);
   }
 
   return false;
+}
+
+/**
+ * Keeps the target row at the top while the layout around it settles (rows
+ * resize as they render). Gives up instead of fighting when something else
+ * keeps moving the scroller, or when the row can't go any higher (end of the
+ * thread).
+ */
+async function settleOn({
+  hit,
+  uuid,
+  root,
+  scroller,
+  offset,
+  seekId,
+}: {
+  hit: HTMLElement;
+  uuid: string;
+  root: Element;
+  scroller: HTMLElement;
+  offset: number;
+  seekId: number;
+}): Promise<void> {
+  const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+
+  let stableFrames = 0;
+  let interferences = 0;
+  let expectedTop: number | null = null;
+
+  for (let frame = 0; frame < 90 && stableFrames < 6; frame++) {
+    if (seekId !== activeSeek) return;
+
+    // Someone else moved the scroller since our last adjustment.
+    if (
+      expectedTop != null &&
+      Math.abs(scroller.scrollTop - expectedTop) > 4 &&
+      ++interferences >= 3
+    )
+      return;
+
+    const el = scanRows(root).find((row) => row.uuid === uuid)?.el ?? hit;
+    const delta =
+      el.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      offset;
+
+    if (Math.abs(delta) <= 1) {
+      stableFrames++;
+      expectedTop = scroller.scrollTop;
+    } else {
+      stableFrames = 0;
+      const before = scroller.scrollTop;
+      scroller.scrollTo({ top: before + delta, behavior: "instant" });
+      // Clamped at either end: the row can't get any closer.
+      if (Math.abs(scroller.scrollTop - before) < 1) return;
+      expectedTop = scroller.scrollTop;
+    }
+
+    await nextFrame();
+  }
 }
 
 function entriesFromAnyRow(root: Element): string[] {

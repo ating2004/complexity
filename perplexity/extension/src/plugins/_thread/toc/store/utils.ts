@@ -1,6 +1,7 @@
 import debounce from "lodash/debounce";
 
 import type { MessageBlock } from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/thread/message-blocks/types";
+import { DomSelectorsService } from "@/entrypoints/contexts/content-scripts/services/dom-selectors/service-init.loader";
 import { threadTocStore } from "@/plugins/_thread/toc/store";
 import type { TocItem } from "@/plugins/_thread/toc/store/types";
 
@@ -100,14 +101,50 @@ const updateActiveItem = (id: number) => {
  * siblings, so watching rows cross the viewport's middle (as before) left the
  * highlight stuck while reading a long answer.
  */
+/** Set by a TOC click; holds the highlight until the user scrolls themselves. */
+let pinnedActiveId: number | null = null;
+
+/**
+ * Query rows currently on the page, with their position in the TOC. Read from
+ * the DOM on every update rather than from the stored blocks: Perplexity
+ * unmounts and recreates rows as you scroll, so stored element references go
+ * stale between block refreshes.
+ */
+const getMountedRows = (): { index: number; element: HTMLElement }[] =>
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      `${DomSelectorsService.Root.cplxAttribute(
+        DomSelectorsService.Root.internalAttributes.THREAD.MESSAGE.BLOCK,
+      )}[data-index]`,
+    ),
+  ]
+    .map((element) => ({ index: Number(element.dataset.index), element }))
+    .filter(
+      ({ index, element }) => Number.isInteger(index) && element.isConnected,
+    )
+    .sort((a, b) => a.index - b.index);
+
 const updateActiveItemFromScroll = () => {
-  if (currentThreadWrapper == null || currentMessageBlocks == null) return;
-  if (currentMessageBlocks.length === 0) return;
+  if (currentTocItems.length === 0) return;
 
-  const scroller = currentThreadWrapper;
-  const lastIndex = currentMessageBlocks.length - 1;
+  if (pinnedActiveId != null) {
+    updateActiveItem(pinnedActiveId);
+    return;
+  }
 
-  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+  const rows = getMountedRows();
+  // Perplexity nests scroll containers; the one that matters is the row's.
+  const scroller =
+    rows[0]?.element.closest<HTMLElement>(".scrollable-container") ??
+    currentThreadWrapper;
+  if (scroller == null) return;
+
+  const lastIndex = currentTocItems.length - 1;
+
+  if (
+    scroller.scrollHeight > scroller.clientHeight &&
+    scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4
+  ) {
     updateActiveItem(lastIndex);
     return;
   }
@@ -116,29 +153,31 @@ const updateActiveItemFromScroll = () => {
     scroller.getBoundingClientRect().top + scroller.clientHeight * 0.35;
 
   let active = -1;
-  let firstMounted = -1;
-
-  currentMessageBlocks.forEach((block, index) => {
-    const element = block.nodes.$wrapper[0];
-    if (!element?.isConnected) return;
-    if (firstMounted === -1) firstMounted = index;
+  for (const { index, element } of rows) {
     if (element.getBoundingClientRect().top <= readingLine) active = index;
-  });
+  }
 
   // Every mounted row is below the line: we're reading the answer of the
   // entry just before them, which has been unmounted.
-  if (active === -1) active = Math.max(firstMounted - 1, 0);
+  if (active === -1) active = Math.max((rows[0]?.index ?? 0) - 1, 0);
 
-  updateActiveItem(active);
+  updateActiveItem(Math.min(active, lastIndex));
 };
 
 let scrollFrame = 0;
+let settleTimer = 0;
 const onScroll = () => {
-  if (scrollFrame) return;
-  scrollFrame = requestAnimationFrame(() => {
-    scrollFrame = 0;
-    updateActiveItemFromScroll();
-  });
+  if (!scrollFrame) {
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      updateActiveItemFromScroll();
+    });
+  }
+
+  // Trackpad momentum keeps scrolling after the input stops; check again once
+  // it has.
+  clearTimeout(settleTimer);
+  settleTimer = window.setTimeout(updateActiveItemFromScroll, 200);
 };
 
 const updateTopMostItem = (id: number) => {
@@ -330,7 +369,47 @@ const calculatePanelPosition = debounce(
   { leading: true, trailing: true, maxWait: 1000 },
 );
 
+// Scroll events don't bubble, so listen in the capture phase to catch
+// whichever nested container scrolls; scrolling input is watched too, in case
+// the scroll itself isn't observable from here.
+for (const type of ["scroll", "wheel", "touchmove", "keydown"] as const) {
+  document.addEventListener(type, onScroll, { capture: true, passive: true });
+}
+
+// Only real input releases a pinned highlight: the seek itself scrolls the
+// page and dispatches a synthetic wheel event, neither of which counts.
+const releasePin = (event: Event) => {
+  if (!event.isTrusted || pinnedActiveId == null) return;
+  if (
+    event instanceof KeyboardEvent &&
+    ![
+      "ArrowUp",
+      "ArrowDown",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      " ",
+    ].includes(event.key)
+  )
+    return;
+
+  pinnedActiveId = null;
+  onScroll();
+};
+
+for (const type of ["wheel", "touchmove", "keydown"] as const) {
+  document.addEventListener(type, releasePin, { capture: true, passive: true });
+}
+
+/** Highlight a clicked entry right away and keep it until the user scrolls. */
+const pinActiveItem = (id: number) => {
+  pinnedActiveId = id;
+  updateActiveItem(id);
+};
+
 export const utils = {
+  pinActiveItem,
   updateItems,
   calculatePanelPosition,
   setCurrentMessageBlocks: (blocks: MessageBlock[] | null) => {
@@ -340,11 +419,8 @@ export const utils = {
     currentTocItems = items;
   },
   setCurrentThreadWrapper: (wrapper: HTMLElement | null) => {
-    currentThreadWrapper?.removeEventListener("scroll", onScroll);
     currentThreadWrapper = wrapper;
-    currentThreadWrapper?.addEventListener("scroll", onScroll, {
-      passive: true,
-    });
+    pinnedActiveId = null;
     updateActiveItemFromScroll();
   },
   getCurrentTocItems: () => currentTocItems,
