@@ -108,15 +108,79 @@ export type SpaceFileDownloadUrlApiResponse = z.infer<
   typeof SpaceFileDownloadUrlApiResponseSchema
 >;
 
+const ThreadMessageAssetSchema = z.object({
+  kind: z.enum(["image", "file"]),
+  name: z.string(),
+  url: z.string(),
+  /** Set when an image was downloaded to sit next to an exported document. */
+  localPath: z.string().optional(),
+});
+
+export type ThreadMessageAsset = z.infer<typeof ThreadMessageAssetSchema>;
+
+const FILE_ASSET_KEYS = [
+  "pdf_file",
+  "doc_file",
+  "docx_file",
+  "xlsx_file",
+  "slide_file",
+];
+
+/**
+ * Generated images and files aren't part of the answer text: they sit in the
+ * round's tool steps, under
+ * `content.workflow_items[].payload.sources_payload.assets`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractAssets(steps: any[]): ThreadMessageAsset[] {
+  const assets = new Map<string, ThreadMessageAsset>();
+
+  for (const step of steps) {
+    const items = step?.content?.workflow_items;
+    if (!Array.isArray(items)) continue;
+
+    for (const item of items) {
+      const stepAssets = item?.payload?.sources_payload?.assets;
+      if (!Array.isArray(stepAssets)) continue;
+
+      for (const asset of stepAssets) {
+        const image = asset?.generated_image;
+        if (typeof image?.url === "string") {
+          assets.set(image.url, {
+            kind: "image",
+            name: "image",
+            url: image.url,
+          });
+        }
+
+        for (const key of FILE_ASSET_KEYS) {
+          const file = asset?.[key];
+          if (typeof file?.url !== "string") continue;
+          assets.set(file.url, {
+            kind: "file",
+            name: typeof file.filename === "string" ? file.filename : "file",
+            url: file.url,
+          });
+        }
+      }
+    }
+  }
+
+  return [...assets.values()];
+}
+
 export const ThreadMessageTextSchema = z.object({
   answer: z.string(),
-  web_results: z.array(
-    z.object({
-      name: z.string(),
-      url: z.string(),
-      snippet: z.string().catch(""),
-    }),
-  ),
+  assets: z.array(ThreadMessageAssetSchema).optional().catch(undefined),
+  web_results: z
+    .array(
+      z.object({
+        name: z.string(),
+        url: z.string(),
+        snippet: z.string().catch(""),
+      }),
+    )
+    .catch([]),
 });
 
 export const ThreadMessageApiResponseSchema = z.object({
@@ -125,10 +189,18 @@ export const ThreadMessageApiResponseSchema = z.object({
     .string()
     .transform((value) => {
       const parsed = JSON.parse(value);
-      return JSON.parse(parsed[parsed.length - 1].content.answer);
+      return {
+        ...JSON.parse(parsed[parsed.length - 1].content.answer),
+        assets: extractAssets(parsed),
+      };
     })
     .pipe(ThreadMessageTextSchema),
   backend_uuid: z.string(),
+  // Signed afresh on every request, unlike the links in `text`.
+  media_items: z
+    .array(z.object({ url: z.string() }))
+    .optional()
+    .catch(undefined),
   author_image: z.string().nullable().catch(null),
   author_username: z.string().nullable().catch(null),
   thread_url_slug: z.string().catch(""),

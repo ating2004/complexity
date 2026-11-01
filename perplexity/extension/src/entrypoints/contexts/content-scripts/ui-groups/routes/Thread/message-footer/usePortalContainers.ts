@@ -39,6 +39,12 @@ export function usePortalContainers(): (Element | null)[] {
       DomSelectorsService.Root.cachedSync.THREAD.MESSAGE.FOOTER_GROUP.FIRST,
     );
 
+    // Answers without a native copy button: lead the action bar instead.
+    if (!$anchor.length) {
+      messageBlock.nodes.$footer.prepend($portalContainer);
+      return messageBlock.nodes.$footer[0] ? $portalContainer[0]! : null;
+    }
+
     const hasSources = messageBlock.content.webResults.length > 0;
 
     if (hasSources) {

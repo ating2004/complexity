@@ -1079,9 +1079,9 @@ Adele's ability to connect with her audience through her music and her down-to-e
 [3] [Adele Performs Munich Tour Date in Torrential Downpour](https://www.tmz.com/2024/08/14/adele-munich-concert-rain/)  
 [4] [Adele Finally Confirmed That She's Engaged To Rich Paul In A Way That Only Adele Could Do](https://www.buzzfeed.com/larryfitzmaurice/adele-confirms-rich-paul-engagement)  
 [5] [Adele tells Munich concert crowd she's engaged](https://news.sky.com/story/adele-tells-munich-concert-crowd-shes-engaged-13194400)  
-[6] [Adele Finally Seems to Confirm Engagement After Fan Proposes: 'I Can't Marry You, I'm Already Getting Married'](https://people.com/adele-finally-seems-to-confirm-engagement-rich-paul-7568314)  
----  
+[6] [Adele Finally Seems to Confirm Engagement After Fan Proposes: 'I Can't Marry You, I'm Already Getting Married'](https://people.com/adele-finally-seems-to-confirm-engagement-rich-paul-7568314)
 
+---
 
 # What are some of Adele's most iconic songs  
   
@@ -1155,9 +1155,9 @@ As of August 2024, Adele continues to be active in her musical career:
 
 3. **Upcoming Break**: Adele has mentioned her intention to take a "big break" from music after her Las Vegas residency at Caesar's Palace ends in November 2024.
 
-Adele's ability to connect with her audience through her music and her down-to-earth personality continues to endear her to fans worldwide. Her journey from a young aspiring singer in London to a global superstar is a testament to her extraordinary talent and dedication to her craft.  
----  
+Adele's ability to connect with her audience through her music and her down-to-earth personality continues to endear her to fans worldwide. Her journey from a young aspiring singer in London to a global superstar is a testament to her extraordinary talent and dedication to her craft.
 
+---
 
 # What are some of Adele's most iconic songs  
   

@@ -4,6 +4,7 @@ import { toast } from "@/components/ui/use-toast";
 import { threadMessageBlocksDomObserverStore } from "@/entrypoints/contexts/content-scripts/core-plugins/dom-observers/thread/message-blocks/store";
 import type { ThreadMessageApiResponse } from "@/entrypoints/services/externals/pplx-api/pplx-api.types";
 import { PplxThreadParser } from "@/entrypoints/services/externals/pplx-api/pplx-thread-parser";
+import { downloadThreadImages } from "@/entrypoints/services/externals/pplx-api/pplx-thread-parser/download-images";
 import { pplxApiQueries } from "@/entrypoints/services/externals/pplx-api/query-keys";
 import { parseUrl } from "@/utils/misc/utils";
 import { dualClipboardPut } from "@/utils/wrappers/clipboard-utils";
@@ -75,11 +76,16 @@ export function useCopyPplxThread() {
 
       invariant(threadJson != null, "Failed to fetch thread info");
 
-      return PplxThreadParser.exportThread({
-        threadJSON: threadJson,
-        includeCitations: withCitations,
-        messageIndex: messageBlockIndex,
-      });
+      const { messages, images } = await downloadThreadImages(threadJson);
+
+      return {
+        markdown: PplxThreadParser.exportThread({
+          threadJSON: messages,
+          includeCitations: withCitations,
+          messageIndex: messageBlockIndex,
+        }),
+        images,
+      };
     },
   };
 }
@@ -123,7 +129,7 @@ async function copyMessage({
   withCitations: boolean;
 }) {
   const message = await findApiMessage({ fetchFn, messageBlockIndex });
-  const answer = message.text.answer;
+  const answer = PplxThreadParser.extractAnswer(message);
   const webResults = message.text.web_results;
 
   if (!withCitations) {

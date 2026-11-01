@@ -2,6 +2,7 @@ import { APP_CONFIG } from "@/app.config";
 
 const MIME_TYPE_TO_EXTENSION: Record<string, string> = {
   "application/json": ".json",
+  "application/zip": ".zip",
   "text/markdown": ".md",
   "text/plain": ".txt",
 };
@@ -26,7 +27,7 @@ export default async function downloadFile({
   filename,
   mimeType,
 }: {
-  data: string;
+  data: string | Blob;
   filename: string;
   mimeType?: string;
 }): Promise<boolean> {
@@ -47,7 +48,7 @@ function inferMimeTypeFromFilename(filename: string): string | null {
 }
 
 async function downloadFileChrome(
-  data: string,
+  data: string | Blob,
   filename: string,
   mimeType: string,
 ): Promise<boolean> {
@@ -84,7 +85,11 @@ async function downloadFileChrome(
   return true;
 }
 
-function downloadFileGeneric(data: string, filename: string, mimeType: string) {
+function downloadFileGeneric(
+  data: string | Blob,
+  filename: string,
+  mimeType: string,
+) {
   try {
     const blob = new Blob([data], { type: mimeType });
     const url = URL.createObjectURL(blob);

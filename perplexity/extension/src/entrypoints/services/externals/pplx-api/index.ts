@@ -408,7 +408,9 @@ function normalizeComputerTaskEntry(entry: any): unknown {
 
   return {
     ...entry,
+    // The earlier steps are kept because they hold generated files and images.
     text: JSON.stringify([
+      ...steps,
       {
         content: {
           answer: JSON.stringify({

@@ -2,6 +2,7 @@ import type z from "zod";
 
 import type {
   ThreadMessageApiResponse,
+  ThreadMessageAsset,
   ThreadMessageTextSchema,
 } from "@/entrypoints/services/externals/pplx-api/pplx-api.types";
 
@@ -15,7 +16,30 @@ export class PplxThreadParser {
   }
 
   static extractAnswer(message: ThreadMessageApiResponse) {
-    return message.text.answer;
+    // Assets go first, as Perplexity shows them above the answer.
+    const assets = (message.text.assets ?? []).map((asset) =>
+      asset.localPath != null
+        ? `![${asset.name}](${asset.localPath})`
+        : PplxThreadParser.formatMissingAsset(asset),
+    );
+
+    return [...assets, message.text.answer]
+      .filter((part) => part !== "")
+      .join("\n\n");
+  }
+
+  /**
+   * Links to generated files don't work outside Perplexity (files are refused,
+   * image signatures expire within the hour), so point to the conversation.
+   */
+  static formatMissingAsset({ kind, name }: ThreadMessageAsset): string {
+    const label = kind === "image" ? "图片" : `文件「${name}」`;
+    const conversation =
+      typeof location === "undefined"
+        ? "原会话"
+        : `[原会话](${location.origin}${location.pathname})`;
+
+    return `（此处有${label}，未能导出，请查看${conversation}）`;
   }
 
   static extractWebResults(message: ThreadMessageApiResponse): PplxWebResult[] {
@@ -164,7 +188,8 @@ export class PplxThreadParser {
           includeCitations,
         }),
       )
-      .join("  \n---  \n\n\n");
+      // The blank line matters: `---` right under text makes it a heading.
+      .join("\n\n---\n\n");
 
     return removeFollowupLinks(exportedThread);
   }

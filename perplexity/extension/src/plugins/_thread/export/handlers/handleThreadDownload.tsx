@@ -1,10 +1,14 @@
 import { toast } from "@/components/ui/use-toast";
+import type { DownloadedImage } from "@/entrypoints/services/externals/pplx-api/pplx-thread-parser/download-images";
+import { createZip } from "@/utils/misc/create-zip";
 import downloadFile from "@/utils/misc/download-file";
 
 import TablerFileDownload from "~icons/tabler/file-download";
 
 type HandleDownloadParams = {
-  getContent: (params: { withCitations: boolean }) => Promise<string>;
+  getContent: (params: {
+    withCitations: boolean;
+  }) => Promise<{ markdown: string; images: DownloadedImage[] }>;
   withCitations: boolean;
 };
 
@@ -12,7 +16,7 @@ export async function handleThreadDownload({
   getContent,
   withCitations,
 }: HandleDownloadParams): Promise<void> {
-  const filename = `${document.title.substring(0, 100)} ${withCitations ? "" : " (no-citations)"}.md`;
+  const basename = `${document.title.substring(0, 100).replace(/[\\/:*?"<>|]/g, " ")}${withCitations ? "" : " (no-citations)"}`;
 
   let toastTimeout: number | null = null;
   let toastRef: ReturnType<typeof toast> | null = null;
@@ -37,7 +41,20 @@ export async function handleThreadDownload({
   showWaitingToast();
 
   try {
-    const content = await getContent({ withCitations });
+    const { markdown, images } = await getContent({ withCitations });
+
+    // Images sit next to the document, so a thread with images is one archive.
+    const filename = `${basename}.${images.length > 0 ? "zip" : "md"}`;
+    const content =
+      images.length > 0
+        ? createZip([
+            {
+              path: `${basename}.md`,
+              data: new TextEncoder().encode(markdown),
+            },
+            ...images,
+          ])
+        : markdown;
 
     dismissWaitingToast();
 

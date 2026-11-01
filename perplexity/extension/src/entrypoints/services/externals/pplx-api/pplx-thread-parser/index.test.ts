@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  ThreadMessageApiResponseSchema,
+  ThreadMessageTextSchema,
+} from "@/entrypoints/services/externals/pplx-api/pplx-api.types";
 import type { ThreadMessageApiResponse } from "@/entrypoints/services/externals/pplx-api/pplx-api.types";
 import { PplxThreadParser } from "@/entrypoints/services/externals/pplx-api/pplx-thread-parser";
 import {
@@ -68,6 +72,57 @@ describe("ThreadExport", () => {
       expect(PplxThreadParser.formatQueryHeading("plain query")).toBe(
         "# plain query",
       );
+    });
+  });
+
+  describe("ThreadMessageTextSchema", () => {
+    it("treats a missing web_results as no sources", () => {
+      expect(ThreadMessageTextSchema.parse({ answer: "a" })).toEqual({
+        answer: "a",
+        web_results: [],
+      });
+    });
+  });
+
+  describe("assets", () => {
+    const parse = (steps: unknown[]) =>
+      ThreadMessageApiResponseSchema.parse({
+        query_str: "q",
+        backend_uuid: "b",
+        text: JSON.stringify(steps),
+      });
+
+    const toolStep = (assets: unknown[]) => ({
+      content: {
+        workflow_items: [{ payload: { sources_payload: { assets } } }],
+      },
+    });
+
+    it("links downloaded images when the answer has no text", () => {
+      const message = parse([
+        toolStep([{ generated_image: { url: "https://x/a.png?sig=1" } }]),
+        { content: { answer: JSON.stringify({ answer: "" }) } },
+      ]);
+      message.text.assets![0]!.localPath = "images/image-1.jpg";
+
+      expect(PplxThreadParser.extractAnswer(message)).toBe(
+        "![image](images/image-1.jpg)",
+      );
+    });
+
+    it("notes assets that couldn't be exported instead of dead links", () => {
+      const message = parse([
+        toolStep([
+          { code: { script: "https://ignored" } },
+          { pdf_file: { url: "https://x/a.pdf", filename: "a.pdf" } },
+        ]),
+        { content: { answer: JSON.stringify({ answer: "done" }) } },
+      ]);
+
+      const answer = PplxThreadParser.extractAnswer(message);
+      expect(answer).toContain("文件「a.pdf」");
+      expect(answer).not.toContain("https://x/a.pdf");
+      expect(answer.endsWith("\n\ndone")).toBe(true);
     });
   });
 

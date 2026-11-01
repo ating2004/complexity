@@ -124,7 +124,15 @@ function parseMessageBlock({
     nodes,
     content,
     states: {
-      ...getMessageBlockStates({ nodes, isVirtualized, isLast }),
+      ...getMessageBlockStates({
+        nodes,
+        isVirtualized,
+        isLast,
+        // Image-only answers never get an action bar.
+        hasGeneratedImage:
+          rowElement != null &&
+          firstBetween(container, GENERATED_IMAGE, rowElement, null) != null,
+      }),
       isVirtualized,
     },
   };
@@ -153,82 +161,70 @@ function containsOtherRow(el: Element, ownRow: Element): boolean {
   return false;
 }
 
-function isRowElement(el: Element): boolean {
+const GENERATED_IMAGE = 'img[src*="user-gen-media-assets"]';
+
+/** Whether `el` comes after `start` (outside it) and before `end`, if any. */
+function isBetween(el: Element, start: Element, end: Element | null): boolean {
   return (
-    el.hasAttribute(THREAD_ROW_UUID_ATTR) ||
-    el.querySelector(`[${THREAD_ROW_UUID_ATTR}]`) != null
+    !start.contains(el) &&
+    (start.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+      0 &&
+    (end == null ||
+      (end.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) !==
+        0)
   );
 }
 
-/**
- * The answer is not inside the row: walk the row's following siblings (and
- * those of its ancestors, up to the container) until the next query row.
- */
-function findAnswer({
-  rowElement,
-  container,
-}: {
-  rowElement: HTMLElement;
-  container: HTMLElement;
-}): HTMLElement | null {
-  const ANSWER = DomSelectorsService.Root.cachedSync.THREAD.MESSAGE.ANSWER;
-
-  for (
-    let node: HTMLElement | null = rowElement;
-    node && node !== container;
-    node = node.parentElement
-  ) {
-    for (
-      let sibling = node.nextElementSibling;
-      sibling;
-      sibling = sibling.nextElementSibling
-    ) {
-      if (isRowElement(sibling)) return null;
-
-      const answer = sibling.matches(ANSWER)
-        ? sibling
-        : sibling.querySelector(ANSWER);
-      if (answer) return answer as HTMLElement;
-    }
+function firstBetween(
+  container: HTMLElement,
+  selector: string,
+  start: Element,
+  end: Element | null,
+): HTMLElement | null {
+  for (const el of container.querySelectorAll<HTMLElement>(selector)) {
+    if (isBetween(el, start, end)) return el;
   }
 
   return null;
 }
 
 /**
- * Best effort: the action bar under the answer — the row spanning from its
- * copy button to its overflow ("…") button.
+ * Best effort: the action bar of a round — the row spanning from its first
+ * action button to its overflow ("…") button. It sits inside the answer, so it's
+ * searched from the query row (whose own copy button is excluded). Feedback
+ * buttons come first because code blocks in the answer have copy buttons too.
  */
 function findFooter({
-  $answer,
   rowElement,
+  nextRow,
+  container,
 }: {
-  $answer: JQuery<HTMLElement>;
   rowElement: HTMLElement;
+  nextRow: Element | null;
+  container: HTMLElement;
 }): JQuery<HTMLElement> {
   const FOOTER_CHILD =
     DomSelectorsService.Root.cachedSync.THREAD.MESSAGE.FOOTER_CHILD;
 
-  let $scope = $answer;
-  for (let depth = 0; depth < 4 && $scope[0]; depth++) {
-    $scope = $scope.parent();
-    // The answer often shares a parent with its own query row; only stop once
-    // the scope reaches into another round.
-    if ($scope[0] && containsOtherRow($scope[0], rowElement)) break;
+  const actionButton =
+    firstBetween(
+      container,
+      `${FOOTER_CHILD.THUMBS_UP_BUTTON},${FOOTER_CHILD.THUMBS_DOWN_BUTTON}`,
+      rowElement,
+      nextRow,
+    ) ?? firstBetween(container, FOOTER_CHILD.COPY_BUTTON, rowElement, nextRow);
+  if (!actionButton) return $();
 
-    const $copyButton = $scope.find(FOOTER_CHILD.COPY_BUTTON).first();
-    if (!$copyButton.length) continue;
+  const $actionParent = $(actionButton).parent();
 
-    let $row = $copyButton.parent();
-    while ($row[0] && $row[0] !== $scope[0]) {
-      if ($row.find(FOOTER_CHILD.MISC_BUTTON_WRAPPER).length) return $row;
-      $row = $row.parent();
-    }
-
-    return $copyButton.parent();
+  let $row = $actionParent;
+  for (let depth = 0; depth < 4 && $row[0]; depth++) {
+    if ($row[0] === container || containsOtherRow($row[0], rowElement)) break;
+    if ($row.find(FOOTER_CHILD.MISC_BUTTON_WRAPPER).length) return $row;
+    $row = $row.parent();
   }
 
-  return $();
+  return $actionParent;
 }
 
 function findNodes({
@@ -242,7 +238,13 @@ function findNodes({
 
   const $wrapper = $(rowElement);
   const $query = $wrapper.find(SELECTORS.QUERY_WRAPPER).first();
-  const answer = findAnswer({ rowElement, container });
+  const nextRow = firstBetween(
+    container,
+    `[${THREAD_ROW_UUID_ATTR}]`,
+    rowElement,
+    null,
+  );
+  const answer = firstBetween(container, SELECTORS.ANSWER, rowElement, nextRow);
   const $answer = answer ? $(answer) : $();
 
   return {
@@ -252,7 +254,7 @@ function findNodes({
     $queryEditButtonGroup: $query.find(SELECTORS.QUERY_EDIT_BUTTON_GROUP),
     $contentWrapper: $answer.parent(),
     $answer,
-    $footer: findFooter({ $answer, rowElement }),
+    $footer: findFooter({ rowElement, nextRow, container }),
   };
 }
 
@@ -275,10 +277,12 @@ function getMessageBlockStates({
   nodes,
   isVirtualized,
   isLast,
+  hasGeneratedImage,
 }: {
   nodes: MessageBlock["nodes"];
   isVirtualized: boolean;
   isLast: boolean;
+  hasGeneratedImage: boolean;
 }): Omit<MessageBlock["states"], "isVirtualized"> {
   if (isVirtualized) {
     return { isInFlight: false, isReadOnly: true, isEditingQuery: false };
@@ -288,7 +292,7 @@ function getMessageBlockStates({
 
   // Only the newest answer can still be streaming; its action buttons appear
   // once it completes.
-  const isInFlight = isLast && $footer[0] == null;
+  const isInFlight = isLast && $footer[0] == null && !hasGeneratedImage;
 
   $wrapper.attr("data-inflight", isInFlight ? "true" : "false");
 
