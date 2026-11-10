@@ -15,6 +15,14 @@ describe("whereAmI", () => {
     );
   });
 
+  it('should return "thread" for session URLs', () => {
+    expect(
+      whereAmI(
+        "https://www.perplexity.ai/session/17c0df6f-39f5-4acd-b46d-6ab3574464d1",
+      ),
+    ).toBe("thread");
+  });
+
   it('should return "page" for Pages URLs', () => {
     expect(whereAmI("https://www.perplexity.ai/page/example-page")).toBe(
       "page",

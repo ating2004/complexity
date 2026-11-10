@@ -99,7 +99,12 @@ export const whereAmI = (() => {
     ],
     collection: [new MatchPattern(`${hostnameGlob}/spaces/*`)],
     library: [new MatchPattern(`${hostnameGlob}/library*`)],
-    thread: [new MatchPattern(`${hostnameGlob}/search/*`)],
+    // Chats and Computer tasks opened from the sidebar now live under
+    // `/session/<uuid>`; they render with the same thread components.
+    thread: [
+      new MatchPattern(`${hostnameGlob}/search/*`),
+      new MatchPattern(`${hostnameGlob}/session/*`),
+    ],
     computer: [new MatchPattern(`${hostnameGlob}/computer/*`)],
     page: [new MatchPattern(`${hostnameGlob}/page/*`)],
     settings: [
