@@ -17,6 +17,52 @@ export const THREAD_ROW_UUID_ATTR = "data-cplx-row-uuid";
 const THREAD_ROOT_SELECTOR = String.raw`.group\/thread-content`;
 const SCROLLER_SELECTOR = ".scrollable-container";
 
+// The step list on a row can itself be a virtualized window. Keep metadata
+// independently of mounted elements; both the TOC and seeking need this order.
+let cachedRoot: Element | null = null;
+let cachedRoute = "";
+let cachedEntries: ThreadEntry[] = [];
+let outgoingUuids = new Set<string>();
+let cachedPositions = new Map<string, number>();
+
+function mergeEntries(
+  previous: ThreadEntry[],
+  next: ThreadEntry[],
+  positions?: Map<string, number>,
+): ThreadEntry[] {
+  if (!previous.length)
+    return [...new Map(next.map((entry) => [entry.uuid, entry])).values()];
+  const merged = [...previous];
+  const indices = new Map(merged.map((entry, index) => [entry.uuid, index]));
+  for (let i = 0; i < next.length; i++) {
+    const entry = next[i]!;
+    const existing = indices.get(entry.uuid);
+    if (existing != null) {
+      merged[existing] = {
+        ...entry,
+        title: entry.title || merged[existing]!.title,
+      };
+      continue;
+    }
+    // A newly mounted earlier window must be inserted before its next known
+    // neighbour, rather than appended to the end of the conversation.
+    const following = new Set(next.slice(i + 1).map((item) => item.uuid));
+    const position = positions?.get(entry.uuid);
+    const before = merged.findIndex(
+      (item) =>
+        following.has(item.uuid) ||
+        (position != null &&
+          positions?.get(item.uuid) != null &&
+          positions.get(item.uuid)! > position),
+    );
+    const insertion = before < 0 ? merged.length : before;
+    merged.splice(insertion, 0, entry);
+    for (let index = insertion; index < merged.length; index++)
+      indices.set(merged[index]!.uuid, index);
+  }
+  return merged;
+}
+
 export type ThreadEntry = {
   uuid: string;
   title: string;
@@ -234,14 +280,63 @@ export function getThreadEntries(): {
   }
   for (const row of rows) row.el.setAttribute(THREAD_ROW_UUID_ATTR, row.uuid);
 
-  const entries = rows[0] ? entriesFromSteps(rows[0].el) : null;
-  const mountedUuids = rows.map((row) => row.uuid);
+  const route = location.pathname;
+  if (route !== cachedRoute || root !== cachedRoot) {
+    // SPA navigation can update the URL before React removes the old rows.
+    // Do not seed the new conversation's cache from those outgoing rows.
+    outgoingUuids = new Set(
+      route !== cachedRoute ? cachedEntries.map((entry) => entry.uuid) : [],
+    );
+    cachedEntries = [];
+    cachedPositions = new Map();
+    cachedRoute = route;
+    cachedRoot = root;
+    activeSeek++;
+  }
 
-  // A list shorter than what's on screen means we read the wrong array.
-  if (entries && entries.length < mountedUuids.length)
-    return { entries: null, mountedUuids };
+  if (rows.some((row) => !outgoingUuids.has(row.uuid))) outgoingUuids.clear();
+  const currentRows = rows.filter((row) => !outgoingUuids.has(row.uuid));
+  for (const row of currentRows) {
+    const index = rowProps(row.el)?.idx;
+    if (index != null) cachedPositions.set(row.uuid, index);
+  }
+  const mountedUuids = currentRows.map((row) => row.uuid);
+  let snapshot: ThreadEntry[] = [];
+  for (const row of currentRows) {
+    const entries = entriesFromSteps(row.el);
+    if (entries) snapshot = mergeEntries(snapshot, entries);
+    // A shared ancestor usually covers every mounted row. Only inspect other
+    // rows when the first row exposes a narrower per-round/window list.
+    if (
+      mountedUuids.every((uuid) =>
+        snapshot.some((entry) => entry.uuid === uuid),
+      )
+    )
+      break;
+  }
 
-  return { entries, mountedUuids };
+  // Keep DOM-only rows and their titles when React temporarily exposes no
+  // step list, so their titles survive after those rows unmount.
+  snapshot = mergeEntries(
+    snapshot,
+    mountedUuids.map(
+      (uuid) =>
+        snapshot.find((entry) => entry.uuid === uuid) ??
+        cachedEntries.find((entry) => entry.uuid === uuid) ?? {
+          uuid,
+          title: (
+            currentRows.find((row) => row.uuid === uuid)?.el.textContent ?? ""
+          )
+            .trim()
+            .replace(/^\d{1,2}:\d{2}\s*/, "")
+            .replace(/\s+/g, " "),
+          backendUuid: "",
+          webResults: [],
+        },
+    ),
+  );
+  cachedEntries = mergeEntries(cachedEntries, snapshot, cachedPositions);
+  return { entries: cachedEntries.length ? cachedEntries : null, mountedUuids };
 }
 
 let activeSeek = 0;
@@ -259,14 +354,15 @@ export async function scrollToThreadEntry({
   uuid: string;
   offset?: number;
 }): Promise<boolean> {
-  const seekId = ++activeSeek;
   const root = threadRoot();
   const scroller =
     root?.closest<HTMLElement>(SCROLLER_SELECTOR) ??
     document.querySelector<HTMLElement>(SCROLLER_SELECTOR);
   if (!root || !scroller) return false;
 
-  const order = entriesFromAnyRow(root);
+  const order = (getThreadEntries().entries ?? []).map((entry) => entry.uuid);
+  const route = location.pathname;
+  const seekId = ++activeSeek;
   const targetIdx = order.indexOf(uuid);
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -284,7 +380,12 @@ export async function scrollToThreadEntry({
   );
 
   for (let attempt = 0; attempt < 120; attempt++) {
-    if (seekId !== activeSeek) return false;
+    if (
+      seekId !== activeSeek ||
+      route !== location.pathname ||
+      !root.isConnected
+    )
+      return false;
 
     const rows = scanRows(root);
     const hit = rows.find((row) => row.uuid === uuid);
@@ -333,6 +434,7 @@ async function settleOn({
   offset: number;
   seekId: number;
 }): Promise<void> {
+  const route = location.pathname;
   const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
 
   let stableFrames = 0;
@@ -340,7 +442,12 @@ async function settleOn({
   let expectedTop: number | null = null;
 
   for (let frame = 0; frame < 90 && stableFrames < 6; frame++) {
-    if (seekId !== activeSeek) return;
+    if (
+      seekId !== activeSeek ||
+      route !== location.pathname ||
+      !root.isConnected
+    )
+      return;
 
     // Someone else moved the scroller since our last adjustment.
     if (
@@ -370,10 +477,4 @@ async function settleOn({
 
     await nextFrame();
   }
-}
-
-function entriesFromAnyRow(root: Element): string[] {
-  const rows = scanRows(root);
-  const entries = rows[0] ? entriesFromSteps(rows[0].el) : null;
-  return (entries ?? []).map((entry) => entry.uuid);
 }
